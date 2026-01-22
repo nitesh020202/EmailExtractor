@@ -26,6 +26,18 @@ def normalize_text(text):
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
+# --- NEW FUNCTION: Decode Cloudflare Emails ---
+def decode_cf_email(cf_email):
+    email = ""
+    try:
+        r = int(cf_email[:2], 16)
+        for i in range(2, len(cf_email), 2):
+            c = int(cf_email[i:i+2], 16) ^ r
+            email += chr(c)
+    except:
+        return None
+    return email
+
 def extract_emails(text):
     return set(re.findall(EMAIL_REGEX, text))
 
@@ -45,47 +57,70 @@ def crawl_page(url, session, timeout):
         soup = BeautifulSoup(response.text, "lxml")
         title = soup.title.string.strip() if soup.title else "N/A"
         
+        found_emails = set()
+
+        # 1. CLOUDFLARE DECODING (New Logic)
+        # Cloudflare hides emails in 'data-cfemail' attribute
+        for cf in soup.find_all(attrs={"data-cfemail": True}):
+            decoded = decode_cf_email(cf['data-cfemail'])
+            if decoded:
+                found_emails.add(decoded)
+
+        # 2. MAILTO EXTRACTION (New Logic)
+        # Check all links that start with 'mailto:'
+        for a in soup.find_all('a', href=True):
+            if a['href'].lower().startswith('mailto:'):
+                # Clean up the mailto string (remove ?subject= etc)
+                possible_email = a['href'].split(':')[1].split('?')[0]
+                if re.match(EMAIL_REGEX, possible_email):
+                    found_emails.add(possible_email)
+
+        # 3. STANDARD TEXT EXTRACTION (Old Logic)
         page_text = soup.get_text(" ", strip=True)
         normalized_text = normalize_text(page_text)
-        emails = extract_emails(normalized_text)
+        text_emails = extract_emails(normalized_text)
+        found_emails.update(text_emails)
         
+        # Prepare Data
         found_data = []
-        for email in emails:
-            found_data.append({
-                "Email": email,
-                "Page URL": final_url,
-                "Page Title": title
-            })
+        for email in found_emails:
+            # Basic filter to remove garbage/too long strings
+            if len(email) < 50: 
+                found_data.append({
+                    "Email": email,
+                    "Page URL": final_url,
+                    "Page Title": title
+                })
             
         links = set()
         for tag in soup.find_all("a", href=True):
             link = urljoin(final_url, tag["href"])
             parsed = urlparse(link)
+            # Remove queries/fragments for better crawling
             clean_link = parsed.scheme + "://" + parsed.netloc + parsed.path
             links.add(clean_link)
             
         return found_data, links
 
-    except Exception:
+    except Exception as e:
         return [], []
 
 # ---------------- STREAMLIT UI ---------------- #
 
 st.set_page_config(page_title="Fast Email Crawler", page_icon="⚡", layout="wide")
 
-st.title("⚡ High-Speed Email Extractor")
-st.markdown("Multi-threaded crawler with **Real-time Filtering**.")
+st.title("⚡ High-Speed Email Extractor (CF Bypass)")
+st.markdown("Multi-threaded crawler with **Cloudflare Decoding** & **Real-time Filtering**.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    start_url = st.text_input("Start URL", "https://codewila.com/")
+    start_url = st.text_input("Start URL", "https://www.ecraftsmen.com/contact-us")
     max_pages = st.slider("Max Pages", 10, 500, 100)
     workers = st.slider("Speed (Threads)", 5, 50, 20)
     timeout = st.number_input("Timeout (s)", value=5)
     
     st.write("---")
     st.header("🔍 Filters")
-    # Yahan filter select karein
     remove_duplicates = st.checkbox("Remove Duplicate Emails", value=True)
 
 if st.button("🚀 Start Fast Crawl", type="primary"):
@@ -98,9 +133,8 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
     base_domain = urlparse(start_url).netloc
     visited_urls = set([start_url])
     
-    # Ye hai main data store
-    all_emails = []       # Final list
-    seen_emails = set()   # Sirf tracking ke liye (agar duplicate remove karna ho)
+    all_emails = []       
+    seen_emails = set()   
     
     # UI Containers
     status_text = st.empty()
@@ -116,12 +150,13 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
     
     requests.packages.urllib3.disable_warnings()
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    # Headers zaruri hain taaki bot detection kam ho
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    })
 
     pages_scanned = 0
     start_time = time.time()
-    
-    # ---------------- THREAD POOL LOOP ---------------- #
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_url = {executor.submit(crawl_page, start_url, session, timeout): start_url}
@@ -139,17 +174,14 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
                 try:
                     data, links = future.result()
                     
-                    # --- LOGIC CHANGE HERE (Filter before adding) ---
                     if data:
                         if remove_duplicates:
                             for item in data:
                                 email = item['Email']
-                                # Agar ye email pehle nahi mila, tabhi add karo
                                 if email not in seen_emails:
                                     seen_emails.add(email)
                                     all_emails.append(item)
                         else:
-                            # Agar filter OFF hai, to sab add karo
                             all_emails.extend(data)
                     
                     if pages_scanned + len(future_to_url) < max_pages:
@@ -163,19 +195,14 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
                 except Exception:
                     pass
 
-                # UI Updates
                 if pages_scanned % 5 == 0 or pages_scanned == max_pages:
                     elapsed = time.time() - start_time
                     progress = min(pages_scanned / max_pages, 1.0)
                     
                     bar.progress(progress)
                     status_text.text(f"Scanning: {url}")
-                    
                     metric_pages.metric("Pages Scanned", pages_scanned)
                     metric_time.metric("Time Taken", f"{elapsed:.1f}s")
-                    
-                    # Ab yahan direct len(all_emails) use kar sakte hain
-                    # Kyunki all_emails mein ab duplicate hai hi nahi
                     metric_emails.metric("Emails Found", len(all_emails))
                     
                     if all_emails:
