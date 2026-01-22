@@ -109,7 +109,7 @@ def crawl_page(url, session, timeout):
 
 st.set_page_config(page_title="Fast Email Crawler", page_icon="⚡", layout="wide")
 
-st.title("⚡ High-Speed Email Extractor (CF Bypass)")
+st.title("⚡ High-Speed Email Extractor")
 st.markdown("Multi-threaded crawler with **Cloudflare Decoding** & **Real-time Filtering**.")
 
 with st.sidebar:
@@ -224,3 +224,4 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
         st.download_button("⬇️ Download CSV", csv, f"emails_{base_domain}.csv", "text/csv")
     else:
         st.warning("No emails found.")
+
