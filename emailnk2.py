@@ -114,7 +114,7 @@ st.markdown("Multi-threaded crawler with **Cloudflare Decoding** & **Real-time F
 
 with st.sidebar:
     st.header("⚙️ Settings")
-    start_url = st.text_input("Start URL", "https://www.ecraftsmen.com/contact-us")
+    start_url = st.text_input("Start URL", "https://codewila.com/")
     max_pages = st.slider("Max Pages", 10, 500, 100)
     workers = st.slider("Speed (Threads)", 5, 50, 20)
     timeout = st.number_input("Timeout (s)", value=5)
@@ -224,4 +224,5 @@ if st.button("🚀 Start Fast Crawl", type="primary"):
         st.download_button("⬇️ Download CSV", csv, f"emails_{base_domain}.csv", "text/csv")
     else:
         st.warning("No emails found.")
+
 
